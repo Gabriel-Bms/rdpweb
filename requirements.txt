@@ -1,1 +1,6 @@
 streamlit
+streamlit-extras
+opencv-python
+tensorflow
+pillow
+numpy

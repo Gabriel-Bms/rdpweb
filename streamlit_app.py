@@ -12,7 +12,7 @@ import cv2
 
 @st.cache_resource
 def load_segmentation_model():
-    return load_model("best_multiclass_model2.h5")
+    return load_model("best_multiclass_model3.h5")
 
 #======Funciones para realizar predicciones=====================
 class_to_color = {
