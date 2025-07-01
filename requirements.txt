@@ -4,3 +4,8 @@ opencv-python
 tensorflow
 pillow
 numpy
+scipy
+imageio
+matplotlib
+torch
+torchvision

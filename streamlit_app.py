@@ -1,3 +1,6 @@
+import sys
+import os
+from base_dataset import get_transform
 import streamlit as st
 from streamlit_extras.switch_page_button import switch_page
 from streamlit_extras.colored_header import colored_header
@@ -8,7 +11,59 @@ from tensorflow.keras.models import load_model
 from PIL import Image
 import numpy as np
 import cv2
+import torch
+from matplotlib import pyplot as plt
+from types import SimpleNamespace
+from models import create_model
+import torchvision.transforms as T
+import base64
+from io import BytesIO
 
+def image_to_base64(img):
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
+# === CONFIGURACIÓN GLOBAL CYCLE GAN ===============================================
+opt = SimpleNamespace(
+    name="aus2rus",
+    model='cycle_gan',
+    dataset_mode='unaligned',
+    netG='unet_256',
+    direction='AtoB',
+    input_nc=1,
+    output_nc=1,
+    preprocess='resize_and_crop',
+    load_size=256,
+    crop_size=256,
+    batch_size=1,
+    serial_batches=True,
+    no_flip=True,
+    display_id=-1,
+    num_threads=1,
+    eval=True,
+    load_iter=0,
+    epoch='latest',
+    aspect_ratio=1.0,
+    max_dataset_size=float("inf"),
+    gpu_ids=[0] if torch.cuda.is_available() else [],
+    isTrain=False,
+    checkpoints_dir="checkpoints",
+    ngf=64,
+    norm='instance',
+    no_dropout=True,
+    init_type='normal',
+    init_gain=0.02,
+    verbose=False,
+)
+@st.cache_resource
+def load_cycle_gan():
+    model = create_model(opt)
+    model.setup(opt)
+    model.eval()
+    generator = model.netG_A if opt.direction == 'AtoB' else model.netG_B
+    return generator
+generator = load_cycle_gan()
 
 @st.cache_resource
 def load_segmentation_model():
@@ -137,9 +192,9 @@ def create_sidebar_navigation():
             st.session_state.page = "segmentar"
             st.rerun()
         
-        #if st.button("✨ Mejorar Ecografía", key="enhance", help="Mejorar calidad de imagen", use_container_width=True):
-        #    st.session_state.page = "mejorar" 
-        #    st.rerun()
+        if st.button("✨ Mejorar Ecografía", key="enhance", help="Mejorar calidad de imagen", use_container_width=True):
+            st.session_state.page = "mejorar" 
+            st.rerun()
         
         if st.button("ℹ️ Información", key="info", help="Información sobre la aplicación", use_container_width=True):
             st.session_state.page = "informacion"
@@ -307,30 +362,64 @@ def page_segmentar():
 
 # Página de Mejorar==============================================================
 def page_mejorar():
+    from streamlit_extras.colored_header import colored_header
+
     colored_header(
         label="✨ Mejora de Ecografías",
         description="Mejora la calidad y nitidez de tus imágenes ecográficas",
         color_name="green-70"
     )
-    
+
     st.markdown("""
     <div class="upload-area">
         <h3>🎯 Procesamiento de Imagen</h3>
         <p>Sube tu ecografía para aplicar algoritmos de mejora automática</p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     uploaded_file = st.file_uploader(
         "Selecciona una imagen para mejorar",
-        type=['png', 'jpg', 'jpeg', 'dicom'],
+        type=['png'],
         help="La imagen será procesada para mejorar su calidad y contraste"
     )
-    
+
     if uploaded_file is not None:
         st.success("✅ Imagen lista para procesamiento")
-        st.image(uploaded_file, caption="Imagen original", use_column_width=True)
 
-# Página de Información
+        img = Image.open(uploaded_file).convert('RGB')
+        img_resized = img.resize((256, 256), Image.BICUBIC)
+
+        transform = get_transform(opt, grayscale=True)
+        img_tensor = transform(img_resized).unsqueeze(0)
+
+        if torch.cuda.is_available():
+            img_tensor = img_tensor.cuda()
+
+        with torch.no_grad():
+            fake_tensor = generator(img_tensor)
+
+        fake_np = fake_tensor.squeeze().cpu().numpy()
+        fake_np = ((fake_np + 1) / 2.0 * 255.0).clip(0, 255).astype(np.uint8)
+
+        fake_pil = Image.fromarray(fake_np)
+        #col1, col2 = st.columns(2)
+        #with col1:
+        #    st.markdown(
+        #        f"<div style='text-align: center'><img src='data:image/png;base64,{image_to_base64(img_resized.convert('L'))}' width='200'><p>Imagen original (256x256)</p></div>",
+        #        unsafe_allow_html=True
+        #    )
+        #with col2:
+        #    st.markdown(
+        #        f"<div style='text-align: center'><img src='data:image/png;base64,{image_to_base64(fake_pil)}' width='200'><p>Transformada por CycleGAN</p></div>",
+        #        unsafe_allow_html=True
+        #    )
+
+        #Mostrar lado a lado
+        col1, col2 = st.columns(2)
+        col1.image(img_resized.convert('L'), caption="Imagen original (256x256)", width=400)
+        col2.image(fake_np, caption="Transformada por CycleGAN", width=400)
+
+# Página de Información============================================================
 def page_informacion():
     colored_header(
         label="ℹ️ Información del Sistema",
